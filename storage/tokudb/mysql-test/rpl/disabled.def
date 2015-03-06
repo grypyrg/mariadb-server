@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 rpl_tokudb_delete_pk: unreliable, uses timestamp differences
 rpl_tokudb_delete_pk_lookup1: unreliable, uses timestamp differences
 rpl_tokudb_update_pk_uc0_lookup0: unreliable, uses timestamp differences
@@ -14,3 +15,5 @@ rpl_tokudb_read_only_ff: unreliable, uses timestamp differences
 rpl_tokudb_read_only_tf: unreliable, uses timestamp differences
 rpl_tokudb_read_only_tt: unreliable, uses timestamp differences
 rpl_row_sp002_tokudb : tokudb does not support foreign keys
+=======
+>>>>>>> 0e5f4a2... Read free replication for MariaDB
