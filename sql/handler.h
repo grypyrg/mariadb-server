@@ -3977,6 +3977,33 @@ protected:
   void set_ha_share_ptr(Handler_share *arg_ha_share);
   void lock_shared_ha_data();
   void unlock_shared_ha_data();
+
+public:
+  /*
+     Handler calls for Read Free Replication
+     Read free replication is an algorithm that avoids reads when replicating write, delete or update row events.
+     This can speedup up replication on write optimized data structures
+  */
+  virtual void rpl_before_write_rows() {
+  }
+  virtual void rpl_after_write_rows() {
+  }
+  virtual void rpl_before_delete_rows() {
+  }
+  virtual void rpl_after_delete_rows() {
+  }
+  virtual void rpl_before_update_rows() {
+  }
+  virtual void rpl_after_update_rows() {
+  }
+  /*
+     Ask the handler if the row should be read prior to executing a write, delete or update row event.
+     Returns true if a row lookup is required when executing a write, delete, or update row event.
+     Returns false if a row lookup is NOT required, as is the case for Read Free Replication.
+  */
+  virtual bool rpl_lookup_rows() {
+    return true;
+  }
 };
 
 #include "multi_range_read.h"
