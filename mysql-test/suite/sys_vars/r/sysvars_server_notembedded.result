@@ -18,6 +18,7 @@ variable_name not in (
 'rand_seed1',
 'rand_seed2',
 'system_time_zone',
+'thread_pool_size',
 'version_comment',
 'version_compile_machine', 'version_compile_os',
 'version_malloc_library', 'version_ssl_library', 'version'
@@ -4601,20 +4602,6 @@ NUMERIC_BLOCK_SIZE	1
 ENUM_VALUE_LIST	NULL
 READ_ONLY	NO
 COMMAND_LINE_ARGUMENT	REQUIRED
-VARIABLE_NAME	THREAD_POOL_SIZE
-SESSION_VALUE	NULL
-GLOBAL_VALUE	4
-GLOBAL_VALUE_ORIGIN	CONFIG
-DEFAULT_VALUE	8
-VARIABLE_SCOPE	GLOBAL
-VARIABLE_TYPE	INT UNSIGNED
-VARIABLE_COMMENT	Number of thread groups in the pool. This parameter is roughly equivalent to maximum number of concurrently executing threads (threads in a waiting state do not count as executing).
-NUMERIC_MIN_VALUE	1
-NUMERIC_MAX_VALUE	100000
-NUMERIC_BLOCK_SIZE	1
-ENUM_VALUE_LIST	NULL
-READ_ONLY	NO
-COMMAND_LINE_ARGUMENT	REQUIRED
 VARIABLE_NAME	THREAD_POOL_STALL_LIMIT
 SESSION_VALUE	NULL
 GLOBAL_VALUE	500
@@ -4882,6 +4869,7 @@ where variable_name in (
 'rand_seed1',
 'rand_seed2',
 'system_time_zone',
+'thread_pool_size',
 'version_comment',
 'version_compile_machine', 'version_compile_os',
 'version_malloc_library', 'version_ssl_library', 'version'
@@ -4987,6 +4975,16 @@ NUMERIC_BLOCK_SIZE	NULL
 ENUM_VALUE_LIST	NULL
 READ_ONLY	YES
 COMMAND_LINE_ARGUMENT	NULL
+VARIABLE_NAME	THREAD_POOL_SIZE
+VARIABLE_SCOPE	GLOBAL
+VARIABLE_TYPE	INT UNSIGNED
+VARIABLE_COMMENT	Number of thread groups in the pool. This parameter is roughly equivalent to maximum number of concurrently executing threads (threads in a waiting state do not count as executing).
+NUMERIC_MIN_VALUE	1
+NUMERIC_MAX_VALUE	100000
+NUMERIC_BLOCK_SIZE	1
+ENUM_VALUE_LIST	NULL
+READ_ONLY	NO
+COMMAND_LINE_ARGUMENT	REQUIRED
 VARIABLE_NAME	VERSION
 VARIABLE_SCOPE	GLOBAL
 VARIABLE_TYPE	VARCHAR

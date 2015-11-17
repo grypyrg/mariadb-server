@@ -28,6 +28,7 @@ select * from information_schema.system_variables
           'rand_seed1',
           'rand_seed2',
           'system_time_zone',
+          'thread_pool_size',
           'version_comment',
           'version_compile_machine', 'version_compile_os',
           'version_malloc_library', 'version_ssl_library', 'version'
@@ -51,6 +52,7 @@ select VARIABLE_NAME, VARIABLE_SCOPE, VARIABLE_TYPE, VARIABLE_COMMENT,
           'rand_seed1',
           'rand_seed2',
           'system_time_zone',
+          'thread_pool_size',
           'version_comment',
           'version_compile_machine', 'version_compile_os',
           'version_malloc_library', 'version_ssl_library', 'version'

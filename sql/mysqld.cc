@@ -4112,7 +4112,7 @@ static int init_common_variables()
   }
 
 #if defined(HAVE_POOL_OF_THREADS) && !defined(_WIN32)
-  SYSVAR_AUTOSIZE(threadpool_size, my_getncpus());
+  set_sys_var_value_origin(&threadpool_size, sys_var::AUTO);
 #endif
 
   if (init_thread_environment() ||

@@ -3270,7 +3270,7 @@ static Sys_var_uint Sys_threadpool_size(
  "This parameter is roughly equivalent to maximum number of concurrently "
  "executing threads (threads in a waiting state do not count as executing).",
   GLOBAL_VAR(threadpool_size), CMD_LINE(REQUIRED_ARG),
-  VALID_RANGE(1, MAX_THREAD_GROUPS), DEFAULT(8), BLOCK_SIZE(1),
+  VALID_RANGE(1, MAX_THREAD_GROUPS), DEFAULT(my_getncpus()), BLOCK_SIZE(1),
   NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_threadpool_size),
   ON_UPDATE(fix_threadpool_size)
 );
