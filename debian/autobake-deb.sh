@@ -15,7 +15,7 @@ set -e
 # Buildbot, running the test suite from installed .debs on a clean VM.
 export DEB_BUILD_OPTIONS="nocheck"
 
-#export MARIADB_OPTIONAL_DEBS="tokudb-engine"
+export MARIADB_OPTIONAL_DEBS="tokudb-engine"
 
 # Find major.minor version.
 #
@@ -24,8 +24,8 @@ UPSTREAM="${MYSQL_VERSION_MAJOR}.${MYSQL_VERSION_MINOR}.${MYSQL_VERSION_PATCH}${
 RELEASE_EXTRA=""
 
 RELEASE_NAME=""
-PATCHLEVEL="+maria"
-LOGSTRING="MariaDB build"
+PATCHLEVEL="+percona-with-debug-symbols"
+LOGSTRING="MariaDB build and debugging symbols"
 
 # Look up distro-version specific stuff.
 #
@@ -70,7 +70,7 @@ done;
 #
 echo "Incrementing changelog and starting build scripts"
 
-dch -b -D ${CODENAME} -v "${UPSTREAM}${PATCHLEVEL}-${RELEASE_NAME}${RELEASE_EXTRA:+-${RELEASE_EXTRA}}1~${CODENAME}" "Automatic build with ${LOGSTRING}."
+dch -b -D ${CODENAME} -v "${UPSTREAM}${PATCHLEVEL}-${RELEASE_NAME}${RELEASE_EXTRA:+-${RELEASE_EXTRA}}2~${CODENAME}" "Automatic build with ${LOGSTRING}."
 
 echo "Creating package version ${UPSTREAM}${PATCHLEVEL}-${RELEASE_NAME}${RELEASE_EXTRA:+-${RELEASE_EXTRA}}1~${CODENAME} ... "
 
