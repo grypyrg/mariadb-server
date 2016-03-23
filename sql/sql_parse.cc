@@ -1177,6 +1177,7 @@ bool dispatch_command(enum enum_server_command command, THD *thd,
 #ifdef HAVE_REPLICATION
   case COM_REGISTER_SLAVE:
   {
+    status_var_increment(thd->status_var.com_register_slave);
     if (!register_slave(thd, (uchar*)packet, packet_length))
       my_ok(thd);
     break;
@@ -7305,7 +7306,7 @@ bool st_select_lex_unit::add_fake_select_lex(THD *thd_arg)
   @retval
     FALSE  if all is OK
   @retval
-    TRUE   if a memory allocation error occured
+    TRUE   if a memory allocation error occurred
 */
 
 bool

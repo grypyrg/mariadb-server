@@ -1,6 +1,6 @@
 /*
    Copyright (c) 2000, 2015, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2015, MariaDB
+   Copyright (c) 2010, 2016, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -1674,8 +1674,6 @@ void execute_ddl_log_recovery()
   mysql_mutex_unlock(&LOCK_gdl);
   thd->reset_query();
   delete thd;
-  /* Remember that we don't have a THD */
-  set_current_thd(0);
   DBUG_VOID_RETURN;
 }
 
@@ -2255,7 +2253,7 @@ int mysql_rm_table_no_locks(THD *thd, TABLE_LIST *tables, bool if_exists,
       const char *comment_start;
       uint32 comment_len;
 
-      built_query.set_charset(system_charset_info);
+      built_query.set_charset(thd->charset());
       if (if_exists)
         built_query.append("DROP TABLE IF EXISTS ");
       else
@@ -3183,13 +3181,14 @@ static void check_duplicate_key(THD *thd,
 
     // Report a warning if we have two identical keys.
 
+    DBUG_ASSERT(thd->lex->query_tables->alias);
     if (all_columns_are_identical)
     {
       push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
                           ER_DUP_INDEX, ER(ER_DUP_INDEX),
                           key_info->name,
                           thd->lex->query_tables->db,
-                          thd->lex->query_tables->table_name);
+                          thd->lex->query_tables->alias);
       break;
     }
   }
@@ -3326,9 +3325,10 @@ mysql_prepare_create_table(THD *thd, HA_CREATE_INFO *create_info,
                                                sql_field->interval_list);
         List_iterator<String> int_it(sql_field->interval_list);
         String conv, *tmp;
-        char comma_buf[4]; /* 4 bytes for utf32 */
+        char comma_buf[5]; /* 5 bytes for 'filename' charset */
+        DBUG_ASSERT(sizeof(comma_buf) >= cs->mbmaxlen);
         int comma_length= cs->cset->wc_mb(cs, ',', (uchar*) comma_buf,
-                                          (uchar*) comma_buf + 
+                                          (uchar*) comma_buf +
                                           sizeof(comma_buf));
         DBUG_ASSERT(comma_length > 0);
         for (uint i= 0; (tmp= int_it++); i++)
@@ -3474,8 +3474,31 @@ mysql_prepare_create_table(THD *thd, HA_CREATE_INFO *create_info,
 	else
 	{
 	  /* Field redefined */
+
+          /*
+            If we are replacing a BIT field, revert the increment
+            of total_uneven_bit_length that was done above.
+          */
+          if (sql_field->sql_type == MYSQL_TYPE_BIT &&
+              file->ha_table_flags() & HA_CAN_BIT_FIELD)
+            total_uneven_bit_length-= sql_field->length & 7;
+
 	  sql_field->def=		dup_field->def;
 	  sql_field->sql_type=		dup_field->sql_type;
+
+          /*
+            If we are replacing a field with a BIT field, we need
+            to initialize pack_flag. Note that we do not need to
+            increment total_uneven_bit_length here as this dup_field
+            has already been processed.
+          */
+          if (sql_field->sql_type == MYSQL_TYPE_BIT)
+          {
+            sql_field->pack_flag= FIELDFLAG_NUMBER;
+            if (!(file->ha_table_flags() & HA_CAN_BIT_FIELD))
+              sql_field->pack_flag|= FIELDFLAG_TREAT_BIT_AS_CHAR;
+          }
+
 	  sql_field->charset=		(dup_field->charset ?
 					 dup_field->charset :
 					 create_info->default_table_charset);
@@ -4650,8 +4673,8 @@ int create_table_impl(THD *thd,
   bool          frm_only= create_table_mode == C_ALTER_TABLE_FRM_ONLY;
   bool          internal_tmp_table= create_table_mode == C_ALTER_TABLE || frm_only;
   DBUG_ENTER("mysql_create_table_no_lock");
-  DBUG_PRINT("enter", ("db: '%s'  table: '%s'  tmp: %d",
-                       db, table_name, internal_tmp_table));
+  DBUG_PRINT("enter", ("db: '%s'  table: '%s'  tmp: %d  path: %s",
+                       db, table_name, internal_tmp_table, path));
 
   if (thd->variables.sql_mode & MODE_NO_DIR_IN_CREATE)
   {
@@ -6146,6 +6169,7 @@ static bool fill_alter_inplace_info(THD *thd,
     c) flags passed to storage engine contain more detailed information
        about nature of changes than those provided from parser.
   */
+  bool maybe_alter_vcol= false;
   for (f_ptr= table->field; (field= *f_ptr); f_ptr++)
   {
     /* Clear marker for renamed or dropped field
@@ -6169,7 +6193,8 @@ static bool fill_alter_inplace_info(THD *thd,
       /*
         Check if type of column has changed to some incompatible type.
       */
-      switch (field->is_equal(new_field))
+      uint is_equal= field->is_equal(new_field);
+      switch (is_equal)
       {
       case IS_EQUAL_NO:
         /* New column type is incompatible with old one. */
@@ -6222,15 +6247,17 @@ static bool fill_alter_inplace_info(THD *thd,
       }
 
       /*
-        Check if the altered column is computed and either
+        Check if the column is computed and either
         is stored or is used in the partitioning expression.
-        TODO: Mark such a column with an alter flag only if
-        the defining expression has changed.
       */
       if (field->vcol_info && 
           (field->stored_in_db || field->vcol_info->is_in_partitioning_expr()))
       {
-        ha_alter_info->handler_flags|= Alter_inplace_info::ALTER_COLUMN_VCOL;
+        if (is_equal == IS_EQUAL_NO ||
+            !field->vcol_info->is_equal(new_field->vcol_info))
+          ha_alter_info->handler_flags|= Alter_inplace_info::ALTER_COLUMN_VCOL;
+        else
+          maybe_alter_vcol= true;
       }
 
       /* Check if field was renamed */
@@ -6294,6 +6321,21 @@ static bool fill_alter_inplace_info(THD *thd,
       DBUG_ASSERT(ha_alter_info->handler_flags & Alter_inplace_info::DROP_COLUMN);
       field->flags|= FIELD_IS_DROPPED;
     }
+  }
+
+  if (maybe_alter_vcol)
+  {
+    /*
+      No virtual column was altered, but perhaps one of the other columns was,
+      and that column was part of the vcol expression?
+      We don't detect this correctly (FIXME), so let's just say that a vcol
+      *might* be affected if any other column was altered.
+    */
+    if (ha_alter_info->handler_flags &
+          ( Alter_inplace_info::ALTER_COLUMN_TYPE
+          | Alter_inplace_info::ALTER_COLUMN_NOT_NULLABLE
+          | Alter_inplace_info::ALTER_COLUMN_OPTION ))
+      ha_alter_info->handler_flags|= Alter_inplace_info::ALTER_COLUMN_VCOL;
   }
 
   new_field_it.init(alter_info->create_list);
@@ -6889,7 +6931,7 @@ static bool mysql_inplace_alter_table(THD *thd,
                                       MDL_request *target_mdl_request,
                                       Alter_table_ctx *alter_ctx)
 {
-  Open_table_context ot_ctx(thd, MYSQL_OPEN_REOPEN);
+  Open_table_context ot_ctx(thd, MYSQL_OPEN_REOPEN | MYSQL_OPEN_IGNORE_KILLED);
   handlerton *db_type= table->s->db_type();
   MDL_ticket *mdl_ticket= table->mdl_ticket;
   HA_CREATE_INFO *create_info= ha_alter_info->create_info;
@@ -9094,13 +9136,13 @@ bool mysql_alter_table(THD *thd,char *new_db, char *new_name,
       error, but still worth reporting as it might indicate serious
       problem with server.
     */
-    goto err_with_mdl;
+    goto err_with_mdl_after_alter;
   }
 
 end_inplace:
 
   if (thd->locked_tables_list.reopen_tables(thd))
-    goto err_with_mdl;
+    goto err_with_mdl_after_alter;
 
   THD_STAGE_INFO(thd, stage_end);
 
@@ -9198,6 +9240,10 @@ err_new_table_cleanup:
   }
 
   DBUG_RETURN(true);
+
+err_with_mdl_after_alter:
+  /* the table was altered. binlog the operation */
+  write_bin_log(thd, true, thd->query(), thd->query_length());
 
 err_with_mdl:
   /*

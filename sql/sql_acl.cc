@@ -959,8 +959,6 @@ my_bool acl_init(bool dont_read_acl_tables)
   */
   return_val= acl_reload(thd);
   delete thd;
-  /* Remember that we don't have a THD */
-  set_current_thd(0);
   DBUG_RETURN(return_val);
 }
 
@@ -6371,8 +6369,6 @@ my_bool grant_init()
   thd->store_globals();
   return_val=  grant_reload(thd);
   delete thd;
-  /* Remember that we don't have a THD */
-  set_current_thd(0);
   DBUG_RETURN(return_val);
 }
 
@@ -9899,7 +9895,7 @@ bool sp_revoke_privileges(THD *thd, const char *sp_db, const char *sp_name,
 
   @return
     @retval FALSE Success
-    @retval TRUE An error occured. Error message not yet sent.
+    @retval TRUE An error occurred. Error message not yet sent.
 */
 
 bool sp_grant_privileges(THD *thd, const char *sp_db, const char *sp_name,
@@ -10059,6 +10055,8 @@ acl_check_proxy_grant_access(THD *thd, const char *host, const char *user,
     DBUG_RETURN(FALSE);
   }
 
+  mysql_mutex_lock(&acl_cache->lock);
+
   /* check for matching WITH PROXY rights */
   for (uint i=0; i < acl_proxy_users.elements; i++)
   {
@@ -10071,10 +10069,12 @@ acl_check_proxy_grant_access(THD *thd, const char *host, const char *user,
         proxy->get_with_grant())
     {
       DBUG_PRINT("info", ("found"));
+      mysql_mutex_unlock(&acl_cache->lock);
       DBUG_RETURN(FALSE);
     }
   }
 
+  mysql_mutex_unlock(&acl_cache->lock);
   my_error(ER_ACCESS_DENIED_NO_PASSWORD_ERROR, MYF(0),
            thd->security_ctx->user,
            thd->security_ctx->host_or_ip);

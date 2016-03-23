@@ -1,5 +1,5 @@
 /* Copyright (c) 2000, 2015 Oracle and/or its affiliates.
-   Copyright (c) 2009, 2015 MariaDB
+   Copyright (c) 2009, 2016 MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -443,7 +443,7 @@ bool handle_select(THD *thd, LEX *lex, select_result *result,
     this field from inner subqueries.
 
   @return Status
-  @retval true An error occured.
+  @retval true An error occurred.
   @retval false OK.
  */
 
@@ -3249,11 +3249,6 @@ mysql_select(THD *thd, Item ***rref_pointer_array,
     {
       if (select_lex->linkage != GLOBAL_OPTIONS_TYPE)
       {
-	//here is EXPLAIN of subselect or derived table
-	if (join->change_result(result))
-	{
-	  DBUG_RETURN(TRUE);
-	}
         /*
           Original join tabs might be overwritten at first
           subselect execution. So we need to restore them.
@@ -7309,7 +7304,7 @@ double table_multi_eq_cond_selectivity(JOIN *join, uint idx, JOIN_TAB *s,
       {
         double curr_eq_fld_sel;
         fld= fi.get_curr_field();
-        if (!fld->table->map & ~(table_bit | rem_tables))
+        if (!(fld->table->map & ~(table_bit | rem_tables)))
           continue;
         curr_eq_fld_sel= get_column_avg_frequency(fld) /
                          fld->table->stat_records();
@@ -12707,7 +12702,7 @@ static bool check_equality(THD *thd, Item *item, COND_EQUAL *cond_equal,
     equality predicates that is equivalent to the conjunction.
     Thus, =(a1,a2,a3) can substitute for ((a1=a3) AND (a2=a3) AND (a2=a1)) as
     it is equivalent to ((a1=a2) AND (a2=a3)).
-    The function always makes a substitution of all equality predicates occured
+    The function always makes a substitution of all equality predicates occurred
     in a conjuction for a minimal set of multiple equality predicates.
     This set can be considered as a canonical representation of the
     sub-conjunction of the equality predicates.
@@ -15806,8 +15801,8 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
   uint  temp_pool_slot=MY_BIT_NONE;
   uint fieldnr= 0;
   ulong reclength, string_total_length;
-  bool  using_unique_constraint= 0;
-  bool  use_packed_rows= 0;
+  bool  using_unique_constraint= false;
+  bool  use_packed_rows= false;
   bool  not_all_columns= !(select_options & TMP_TABLE_ALL_COLUMNS);
   char  *tmpname,path[FN_REFLEN];
   uchar	*pos, *group_buff, *bitmaps;
@@ -15880,10 +15875,10 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
       */
       (*tmp->item)->marker=4;			// Store null in key
       if ((*tmp->item)->too_big_for_varchar())
-	using_unique_constraint=1;
+	using_unique_constraint= true;
     }
     if (param->group_length >= MAX_BLOB_WIDTH)
-      using_unique_constraint=1;
+      using_unique_constraint= true;
     if (group)
       distinct=0;				// Can't use distinct
   }
@@ -16136,12 +16131,14 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
         *blob_field++= fieldnr;
 	blob_count++;
       }
+
       if (new_field->real_type() == MYSQL_TYPE_STRING ||
           new_field->real_type() == MYSQL_TYPE_VARCHAR)
       {
         string_count++;
         string_total_length+= new_field->pack_length();
       }
+
       if (item->marker == 4 && item->maybe_null)
       {
 	group_null_items++;
@@ -16194,7 +16191,7 @@ create_tmp_table(THD *thd, TMP_TABLE_PARAM *param, List<Item> &fields,
     if (group &&
 	(param->group_parts > table->file->max_key_parts() ||
 	 param->group_length > table->file->max_key_length()))
-      using_unique_constraint=1;
+      using_unique_constraint= true;
   }
   else
   {
@@ -16856,6 +16853,12 @@ bool create_internal_tmp_table(TABLE *table, KEY *keyinfo,
       goto err;
 
     bzero(seg, sizeof(*seg) * keyinfo->user_defined_key_parts);
+    /*
+       Note that a similar check is performed during
+       subquery_types_allow_materialization. See MDEV-7122 for more details as
+       to why. Whenever this changes, it must be updated there as well, for
+       all tmp_table engines.
+    */
     if (keyinfo->key_length > table->file->max_key_length() ||
 	keyinfo->user_defined_key_parts > table->file->max_key_parts() ||
 	share->uniques)
@@ -17029,6 +17032,12 @@ bool create_internal_tmp_table(TABLE *table, KEY *keyinfo,
       goto err;
 
     bzero(seg, sizeof(*seg) * keyinfo->user_defined_key_parts);
+    /*
+       Note that a similar check is performed during
+       subquery_types_allow_materialization. See MDEV-7122 for more details as
+       to why. Whenever this changes, it must be updated there as well, for
+       all tmp_table engines.
+    */
     if (keyinfo->key_length > table->file->max_key_length() ||
 	keyinfo->user_defined_key_parts > table->file->max_key_parts() ||
 	share->uniques)
@@ -17107,7 +17116,10 @@ bool create_internal_tmp_table(TABLE *table, KEY *keyinfo,
 		       start_recinfo,
 		       share->uniques, &uniquedef,
 		       &create_info,
-		       HA_CREATE_TMP_TABLE | HA_CREATE_INTERNAL_TABLE)))
+		       HA_CREATE_TMP_TABLE | HA_CREATE_INTERNAL_TABLE |
+                       ((share->db_create_options & HA_OPTION_PACK_RECORD) ?
+                        HA_PACK_RECORD : 0)
+                      )))
   {
     table->file->print_error(error,MYF(0));	/* purecov: inspected */
     table->db_stat=0;
@@ -18471,7 +18483,18 @@ int join_read_key2(THD *thd, JOIN_TAB *tab, TABLE *table, TABLE_REF *table_ref)
     }
   }
 
+  /*
+    The following is needed when one makes ref (or eq_ref) access from row
+    comparisons: one must call row->bring_value() to get the new values.
+  */
+  if (tab && tab->bush_children)
+  {
+    TABLE_LIST *emb_sj_nest= tab->bush_children->start->emb_sj_nest;
+    emb_sj_nest->sj_subq_pred->left_expr->bring_value();
+  }
+
   /* TODO: Why don't we do "Late NULLs Filtering" here? */
+
   if (cmp_buffer_with_ref(thd, table, table_ref) ||
       (table->status & (STATUS_GARBAGE | STATUS_NO_PARENT | STATUS_NULL_ROW)))
   {
@@ -20013,6 +20036,7 @@ uint find_shortest_key(TABLE *table, const key_map *usable_keys)
           min_cost= cost;
           best=nr;
         }
+        DBUG_ASSERT(best < MAX_KEY);
       }
     }
   }
@@ -20812,7 +20836,7 @@ create_sort_index(THD *thd, JOIN *join, ORDER *order,
                             select, filesort_limit, 0,
                             &examined_rows, &found_rows);
   table->sort.found_records= filesort_retval;
-  tab->records= found_rows;                     // For SQL_CALC_ROWS
+  tab->records= join->select_options & OPTION_FOUND_ROWS ? found_rows : filesort_retval;
 
   if (quick_created)
   {
@@ -21356,7 +21380,7 @@ find_order_in_list(THD *thd, Item **ref_pointer_array, TABLE_LIST *tables,
   select_item= find_item_in_list(order_item, fields, &counter,
                                  REPORT_EXCEPT_NOT_FOUND, &resolution);
   if (!select_item)
-    return TRUE; /* The item is not unique, or some other error occured. */
+    return TRUE; /* The item is not unique, or some other error occurred. */
 
 
   /* Check whether the resolved field is not ambiguos. */
@@ -24712,7 +24736,7 @@ void JOIN::restore_query_plan(Join_plan_state *restore_from)
  
   @retval REOPT_NEW_PLAN  there is a new plan.
   @retval REOPT_OLD_PLAN  no new improved plan was produced, use the old one.
-  @retval REOPT_ERROR     an irrecovarable error occured during reoptimization.
+  @retval REOPT_ERROR     an irrecovarable error occurred during reoptimization.
 */
 
 JOIN::enum_reopt_result

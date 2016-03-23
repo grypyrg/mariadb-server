@@ -986,8 +986,8 @@ check_slave_start_position(binlog_send_info *info, const char **errormsg,
     rpl_gtid master_replication_gtid;
     rpl_gtid start_gtid;
     bool start_at_own_slave_pos=
-      rpl_global_gtid_slave_state.domain_to_gtid(slave_gtid->domain_id,
-                                                 &master_replication_gtid) &&
+      rpl_global_gtid_slave_state->domain_to_gtid(slave_gtid->domain_id,
+                                                  &master_replication_gtid) &&
       slave_gtid->server_id == master_replication_gtid.server_id &&
       slave_gtid->seq_no == master_replication_gtid.seq_no;
 
@@ -3078,7 +3078,7 @@ int reset_slave(THD *thd, Master_info* mi)
   char fname[FN_REFLEN];
   int thread_mask= 0, error= 0;
   uint sql_errno=ER_UNKNOWN_ERROR;
-  const char* errmsg= "Unknown error occured while reseting slave";
+  const char* errmsg= "Unknown error occurred while reseting slave";
   char master_info_file_tmp[FN_REFLEN];
   char relay_log_info_file_tmp[FN_REFLEN];
   DBUG_ENTER("reset_slave");
@@ -3660,7 +3660,7 @@ bool mysql_show_binlog_events(THD* thd)
   DBUG_ASSERT(thd->lex->sql_command == SQLCOM_SHOW_BINLOG_EVENTS ||
               thd->lex->sql_command == SQLCOM_SHOW_RELAYLOG_EVENTS);
 
-  /* select wich binary log to use: binlog or relay */
+  /* select which binary log to use: binlog or relay */
   if ( thd->lex->sql_command == SQLCOM_SHOW_BINLOG_EVENTS )
   {
     /*
@@ -4032,14 +4032,14 @@ int log_loaded_block(IO_CACHE* file)
 void
 rpl_init_gtid_slave_state()
 {
-  rpl_global_gtid_slave_state.init();
+  rpl_global_gtid_slave_state= new rpl_slave_state;
 }
 
 
 void
 rpl_deinit_gtid_slave_state()
 {
-  rpl_global_gtid_slave_state.deinit();
+  delete rpl_global_gtid_slave_state;
 }
 
 
@@ -4075,7 +4075,7 @@ rpl_append_gtid_state(String *dest, bool use_binlog)
       (err= mysql_bin_log.get_most_recent_gtid_list(&gtid_list, &num_gtids)))
     return err;
 
-  err= rpl_global_gtid_slave_state.tostring(dest, gtid_list, num_gtids);
+  err= rpl_global_gtid_slave_state->tostring(dest, gtid_list, num_gtids);
   my_free(gtid_list);
 
   return err;
@@ -4100,7 +4100,7 @@ rpl_load_gtid_state(slave_connection_state *state, bool use_binlog)
       (err= mysql_bin_log.get_most_recent_gtid_list(&gtid_list, &num_gtids)))
     return err;
 
-  err= state->load(&rpl_global_gtid_slave_state, gtid_list, num_gtids);
+  err= state->load(rpl_global_gtid_slave_state, gtid_list, num_gtids);
   my_free(gtid_list);
 
   return err;
@@ -4197,7 +4197,7 @@ rpl_gtid_pos_check(THD *thd, char *str, size_t len)
 bool
 rpl_gtid_pos_update(THD *thd, char *str, size_t len)
 {
-  if (rpl_global_gtid_slave_state.load(thd, str, len, true, true))
+  if (rpl_global_gtid_slave_state->load(thd, str, len, true, true))
   {
     my_error(ER_FAILED_GTID_STATE_INIT, MYF(0));
     return true;

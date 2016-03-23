@@ -112,7 +112,7 @@ static const char *reconnect_messages[SLAVE_RECON_ACT_MAX][SLAVE_RECON_MSG_MAX]=
 {
   {
     "Waiting to reconnect after a failed registration on master",
-    "Slave I/O thread killed while waitnig to reconnect after a failed \
+    "Slave I/O thread killed while waiting to reconnect after a failed \
 registration on master",
     "Reconnecting after a failed registration on master",
     "failed registering on master, reconnecting to try again, \
@@ -2185,8 +2185,8 @@ after_set_capability:
         (master_row= mysql_fetch_row(master_res)) &&
         (master_row[0] != NULL))
     {
-      rpl_global_gtid_slave_state.load(mi->io_thd, master_row[0],
-                                       strlen(master_row[0]), false, false);
+      rpl_global_gtid_slave_state->load(mi->io_thd, master_row[0],
+                                        strlen(master_row[0]), false, false);
     }
     else if (check_io_slave_killed(mi, NULL))
       goto slave_killed_err;
@@ -2496,7 +2496,7 @@ bool show_master_info(THD *thd, Master_info *mi, bool full)
   DBUG_ENTER("show_master_info");
   String gtid_pos;
 
-  if (full && rpl_global_gtid_slave_state.tostring(&gtid_pos, NULL, 0))
+  if (full && rpl_global_gtid_slave_state->tostring(&gtid_pos, NULL, 0))
     DBUG_RETURN(TRUE);
   if (send_show_master_info_header(thd, full, gtid_pos.length()))
     DBUG_RETURN(TRUE);
@@ -2615,6 +2615,8 @@ static bool send_show_master_info_header(THD *thd, bool full,
   DBUG_RETURN(FALSE);
 }
 
+/* Text for Slave_IO_Running */
+static const char *slave_running[]= { "No", "Connecting", "Preparing", "Yes" };
 
 static bool send_show_master_info_data(THD *thd, Master_info *mi, bool full,
                                        String *gtid_pos)
@@ -2668,9 +2670,7 @@ static bool send_show_master_info_data(THD *thd, Master_info *mi, bool full,
                     &my_charset_bin);
     protocol->store((ulonglong) mi->rli.group_relay_log_pos);
     protocol->store(mi->rli.group_master_log_name, &my_charset_bin);
-    protocol->store(mi->slave_running == MYSQL_SLAVE_RUN_CONNECT ?
-                    "Yes" : (mi->slave_running == MYSQL_SLAVE_RUN_NOT_CONNECT ?
-                             "Connecting" : "No"), &my_charset_bin);
+    protocol->store(slave_running[mi->slave_running], &my_charset_bin);
     protocol->store(mi->rli.slave_running ? "Yes":"No", &my_charset_bin);
     protocol->store(rpl_filter->get_do_db());
     protocol->store(rpl_filter->get_ignore_db());
@@ -2713,7 +2713,7 @@ static bool send_show_master_info_data(THD *thd, Master_info *mi, bool full,
       Seconds_Behind_Master: if SQL thread is running and I/O thread is
       connected, we can compute it otherwise show NULL (i.e. unknown).
     */
-    if ((mi->slave_running == MYSQL_SLAVE_RUN_CONNECT) &&
+    if ((mi->slave_running == MYSQL_SLAVE_RUN_READING) &&
         mi->rli.slave_running)
     {
       long time_diff;
@@ -3593,7 +3593,7 @@ static int exec_relay_log_event(THD* thd, Relay_log_info* rli,
 
       if (opt_gtid_ignore_duplicates)
       {
-        int res= rpl_global_gtid_slave_state.check_duplicate_gtid
+        int res= rpl_global_gtid_slave_state->check_duplicate_gtid
           (&serial_rgi->current_gtid, serial_rgi);
         if (res < 0)
         {
@@ -4040,10 +4040,9 @@ connected:
     if (request_dump(thd, mysql, mi, &suppress_warnings))
     {
       sql_print_error("Failed on request_dump()");
-      if (check_io_slave_killed(mi, "Slave I/O thread killed while \
-requesting master dump") ||
-          try_to_reconnect(thd, mysql, mi, &retry_count, suppress_warnings,
-                           reconnect_messages[SLAVE_RECON_ACT_DUMP]))
+      if (check_io_slave_killed(mi, NullS) ||
+        try_to_reconnect(thd, mysql, mi, &retry_count, suppress_warnings,
+                         reconnect_messages[SLAVE_RECON_ACT_DUMP]))
         goto err;
       goto connected;
     }
@@ -4059,6 +4058,7 @@ requesting master dump") ||
       });
     const char *event_buf;
 
+    mi->slave_running= MYSQL_SLAVE_RUN_READING;
     DBUG_ASSERT(mi->last_error().number == 0);
     while (!io_slave_killed(mi))
     {
@@ -4071,8 +4071,7 @@ requesting master dump") ||
       */
       THD_STAGE_INFO(thd, stage_waiting_for_master_to_send_event);
       event_len= read_event(mysql, mi, &suppress_warnings);
-      if (check_io_slave_killed(mi, "Slave I/O thread killed while \
-reading event"))
+      if (check_io_slave_killed(mi, NullS))
         goto err;
       DBUG_EXECUTE_IF("FORCE_SLAVE_TO_RECONNECT_EVENT",
         if (!retry_count_event)
@@ -4541,15 +4540,6 @@ pthread_handler_t handle_slave_sql(void *arg)
 
   serial_rgi->gtid_sub_id= 0;
   serial_rgi->gtid_pending= false;
-  if (mi->using_gtid != Master_info::USE_GTID_NO)
-  {
-    /*
-      We initialize the relay log state from the know starting position.
-      It will then be updated as required by GTID and GTID_LIST events found
-      while applying events read from relay logs.
-    */
-    rli->relay_log_state.load(&rpl_global_gtid_slave_state);
-  }
   rli->gtid_skip_flag = GTID_SKIP_NOT;
   if (init_relay_log_pos(rli,
                          rli->group_relay_log_name,
@@ -4779,9 +4769,9 @@ log '%s' at position %s, relay log '%s' position: %s%s", RPL_LOG_NAME,
         To handle this when we restart the SQL thread, mark the current
         per-domain position in the Relay_log_info.
       */
-      mysql_mutex_lock(&rpl_global_gtid_slave_state.LOCK_slave_state);
-      domain_count= rpl_global_gtid_slave_state.count();
-      mysql_mutex_unlock(&rpl_global_gtid_slave_state.LOCK_slave_state);
+      mysql_mutex_lock(&rpl_global_gtid_slave_state->LOCK_slave_state);
+      domain_count= rpl_global_gtid_slave_state->count();
+      mysql_mutex_unlock(&rpl_global_gtid_slave_state->LOCK_slave_state);
       if (domain_count > 1)
       {
         inuse_relaylog *ir;
@@ -4792,7 +4782,7 @@ log '%s' at position %s, relay log '%s' position: %s%s", RPL_LOG_NAME,
           the relay log back to a known safe place to start (prior to any not
           yet applied transaction in any domain).
         */
-        rli->restart_gtid_pos.load(&rpl_global_gtid_slave_state, NULL, 0);
+        rli->restart_gtid_pos.load(rpl_global_gtid_slave_state, NULL, 0);
         if ((ir= rli->inuse_relaylog_list))
         {
           rpl_gtid *gtid= ir->relay_log_state;
@@ -4805,6 +4795,7 @@ log '%s' at position %s, relay log '%s' position: %s%s", RPL_LOG_NAME,
           }
           strmake_buf(rli->group_relay_log_name, ir->name);
           rli->group_relay_log_pos= BIN_LOG_HEADER_SIZE;
+          rli->relay_log_state.load(ir->relay_log_state, ir->relay_log_state_count);
         }
       }
     }
@@ -4857,6 +4848,7 @@ err_during_init:
   */
   mysql_mutex_lock(&LOCK_active_mi);
   if (opt_slave_parallel_threads > 0 &&
+      master_info_index &&// master_info_index is set to NULL on server shutdown
       !master_info_index->any_slave_sql_running())
     rpl_parallel_inactivate_pool(&global_rpl_thread_pool);
   mysql_mutex_unlock(&LOCK_active_mi);

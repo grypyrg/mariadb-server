@@ -1557,7 +1557,7 @@ String *Item_func_insert::val_str(String *str)
    length= res->charpos((int) length, (uint32) start);
 
   /* Re-testing with corrected params */
-  if (start > res->length())
+  if (start + 1 > res->length()) // remember, start = args[1].val_int() - 1
     return res; /* purecov: inspected */        // Wrong param; skip insert
   if (length > res->length() - start)
     length= res->length() - start;
@@ -4448,6 +4448,8 @@ bool Item_func_dyncol_create::prepare_arguments(bool force_names_arg)
     case DYN_COL_DYNCOL:
     case DYN_COL_STRING:
       res= args[valpos]->val_str(&tmp);
+      if (res && defs[i].cs)
+        res->set_charset(defs[i].cs);
       if (res &&
           (vals[i].x.string.value.str= sql_strmake(res->ptr(), res->length())))
       {

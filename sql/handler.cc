@@ -313,7 +313,7 @@ int ha_init_errors(void)
   /* Set the dedicated error messages. */
   SETMSG(HA_ERR_KEY_NOT_FOUND,          ER_DEFAULT(ER_KEY_NOT_FOUND));
   SETMSG(HA_ERR_FOUND_DUPP_KEY,         ER_DEFAULT(ER_DUP_KEY));
-  SETMSG(HA_ERR_RECORD_CHANGED,         "Update wich is recoverable");
+  SETMSG(HA_ERR_RECORD_CHANGED,         "Update which is recoverable");
   SETMSG(HA_ERR_WRONG_INDEX,            "Wrong index given to function");
   SETMSG(HA_ERR_CRASHED,                ER_DEFAULT(ER_NOT_KEYFILE));
   SETMSG(HA_ERR_WRONG_IN_RECORD,        ER_DEFAULT(ER_CRASHED_ON_USAGE));
@@ -4236,7 +4236,7 @@ handler::check_if_supported_inplace_alter(TABLE *altered_table,
     IS_EQUAL_PACK_LENGTH : IS_EQUAL_YES;
   if (table->file->check_if_incompatible_data(create_info, table_changes)
       == COMPATIBLE_DATA_YES)
-    DBUG_RETURN(HA_ALTER_INPLACE_EXCLUSIVE_LOCK);
+    DBUG_RETURN(HA_ALTER_INPLACE_NO_LOCK);
 
   DBUG_RETURN(HA_ALTER_INPLACE_NOT_SUPPORTED);
 }

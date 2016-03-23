@@ -1,7 +1,6 @@
 /*****************************************************************************
 
 Copyright (c) 2005, 2015, Oracle and/or its affiliates. All Rights Reserved.
-Copyright (c) 2014, 2015, MariaDB Corporation.
 
 This program is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free Software
@@ -874,8 +873,6 @@ row_merge_read(
 
 	success = os_file_read_no_error_handling(OS_FILE_FROM_FD(fd), buf,
 						 ofs, srv_sort_buf_size);
-	srv_stats.merge_buffers_read.inc();
-
 #ifdef POSIX_FADV_DONTNEED
 	/* Each block is read exactly once.  Free up the file cache. */
 	posix_fadvise(fd, ofs, srv_sort_buf_size, POSIX_FADV_DONTNEED);
@@ -910,7 +907,6 @@ row_merge_write(
 	DBUG_EXECUTE_IF("row_merge_write_failure", return(FALSE););
 
 	ret = os_file_write("(merge)", OS_FILE_FROM_FD(fd), buf, ofs, buf_len);
-	srv_stats.merge_buffers_written.inc();
 
 #ifdef UNIV_DEBUG
 	if (row_merge_print_block_write) {
@@ -1748,7 +1744,7 @@ write_buffers:
 			/* We have enough data tuples to form a block.
 			Sort them and write to disk. */
 
-			if (UNIV_LIKELY(buf->n_tuples)) {
+			if (buf->n_tuples) {
 				if (dict_index_is_unique(buf->index)) {
 					row_merge_dup_t	dup = {
 						buf->index, table, col_map, 0};
@@ -1789,17 +1785,13 @@ write_buffers:
 					dict_index_get_lock(buf->index));
 			}
 
-			/* Do not write empty buffers to temporary file */
-			if (buf->n_tuples) {
+			row_merge_buf_write(buf, file, block);
 
-				row_merge_buf_write(buf, file, block);
-
-				if (!row_merge_write(file->fd, file->offset++,
-						block)) {
-					err = DB_TEMP_FILE_WRITE_FAILURE;
-					trx->error_key_num = i;
-					break;
-				}
+			if (!row_merge_write(file->fd, file->offset++,
+					     block)) {
+				err = DB_TEMP_FILE_WRITE_FAILURE;
+				trx->error_key_num = i;
+				break;
 			}
 
 			UNIV_MEM_INVALID(&block[0], srv_sort_buf_size);
@@ -2084,9 +2076,6 @@ done1:
 	mem_heap_free(heap);
 	b2 = row_merge_write_eof(&block[2 * srv_sort_buf_size],
 				 b2, of->fd, &of->offset);
-
-	srv_stats.merge_buffers_merged.inc();
-
 	return(b2 ? DB_SUCCESS : DB_CORRUPTION);
 }
 
@@ -2312,7 +2301,6 @@ row_merge_sort(
 {
 	const ulint	half	= file->offset / 2;
 	ulint		num_runs;
-	ulint		cur_run = 0;
 	ulint*		run_offset;
 	dberr_t		error	= DB_SUCCESS;
 	DBUG_ENTER("row_merge_sort");
@@ -2336,18 +2324,23 @@ row_merge_sort(
 	of file marker).  Thus, it must be at least one block. */
 	ut_ad(file->offset > 0);
 
-	thd_progress_init(trx->mysql_thd, num_runs);
+	/* Progress report only for "normal" indexes. */
+	if (!(dup->index->type & DICT_FTS)) {
+		thd_progress_init(trx->mysql_thd, 1);
+	}
 
 	/* Merge the runs until we have one big run */
 	do {
-		cur_run++;
-
 		error = row_merge(trx, dup, file, block, tmpfd,
 				  &num_runs, run_offset);
 
 		/* Report progress of merge sort to MySQL for
-		show processlist progress field */
-		thd_progress_report(trx->mysql_thd, cur_run, num_runs);
+		show processlist progress field only for
+		"normal" indexes. */
+		if (!(dup->index->type & DICT_FTS)) {
+			thd_progress_report(trx->mysql_thd, file->offset - num_runs, file->offset);
+
+		}
 
 		if (error != DB_SUCCESS) {
 			break;
@@ -2358,7 +2351,9 @@ row_merge_sort(
 
 	mem_free(run_offset);
 
-	thd_progress_end(trx->mysql_thd);
+	if (!(dup->index->type & DICT_FTS)) {
+		thd_progress_end(trx->mysql_thd);
+	}
 
 	DBUG_RETURN(error);
 }
@@ -3120,7 +3115,7 @@ row_merge_file_create(
 
 	if (merge_file->fd >= 0) {
 		if (srv_disable_sort_file_cache) {
-			os_file_set_nocache(merge_file->fd,
+			os_file_set_nocache(OS_FILE_FROM_FD(merge_file->fd),
 				"row0merge.cc", "sort");
 		}
 	}
@@ -3464,8 +3459,11 @@ row_merge_create_index(
 /*===================*/
 	trx_t*			trx,	/*!< in/out: trx (sets error_state) */
 	dict_table_t*		table,	/*!< in: the index is on this table */
-	const index_def_t*	index_def)
+	const index_def_t*	index_def,
 					/*!< in: the index definition */
+	const char**		col_names)
+					/*! in: column names if columns are
+					renamed or NULL */
 {
 	dict_index_t*	index;
 	dberr_t		err;
@@ -3485,9 +3483,24 @@ row_merge_create_index(
 
 	for (i = 0; i < n_fields; i++) {
 		index_field_t*	ifield = &index_def->fields[i];
-		const char * col_name = ifield->col_name ?
-			dict_table_get_col_name_for_mysql(table, ifield->col_name) :
-			dict_table_get_col_name(table, ifield->col_no);
+		const char * col_name;
+
+		/*
+		Alter table renaming a column and then adding a index
+		to this new name e.g ALTER TABLE t
+		CHANGE COLUMN b c INT NOT NULL, ADD UNIQUE INDEX (c);
+		requires additional check as column names are not yet
+		changed when new index definitions are created. Table's
+		new column names are on a array of column name pointers
+		if any of the column names are changed. */
+
+		if (col_names && col_names[i]) {
+			col_name = col_names[i];
+		} else {
+			col_name = ifield->col_name ?
+				dict_table_get_col_name_for_mysql(table, ifield->col_name) :
+				dict_table_get_col_name(table, ifield->col_no);
+		}
 
 		dict_mem_index_add_field(
 			index,
@@ -3614,7 +3627,7 @@ row_merge_build_indexes(
 
 	block_size = 3 * srv_sort_buf_size;
 	block = static_cast<row_merge_block_t*>(
-		os_mem_alloc_large(&block_size, FALSE));
+		os_mem_alloc_large(&block_size));
 
 	if (block == NULL) {
 		DBUG_RETURN(DB_OUT_OF_MEMORY);
@@ -3766,21 +3779,17 @@ wait_again:
 			DEBUG_FTS_SORT_PRINT("FTS_SORT: Complete Insert\n");
 #endif
 		} else {
-			/* Sorting and inserting is required only if
-			there really is records */
-			if (UNIV_LIKELY(merge_files[i].n_rec)) {
-				row_merge_dup_t	dup = {
-					sort_idx, table, col_map, 0};
+			row_merge_dup_t	dup = {
+				sort_idx, table, col_map, 0};
 
-				error = row_merge_sort(
-					trx, &dup, &merge_files[i],
-					block, &tmpfd);
+			error = row_merge_sort(
+				trx, &dup, &merge_files[i],
+				block, &tmpfd);
 
-				if (error == DB_SUCCESS) {
-					error = row_merge_insert_index_tuples(
-						trx->id, sort_idx, old_table,
-						merge_files[i].fd, block);
-				}
+			if (error == DB_SUCCESS) {
+				error = row_merge_insert_index_tuples(
+					trx->id, sort_idx, old_table,
+					merge_files[i].fd, block);
 			}
 		}
 

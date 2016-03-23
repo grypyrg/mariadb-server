@@ -1,5 +1,5 @@
-/* Copyright (c) 2002, 2012, Oracle and/or its affiliates.
-   Copyright (c) 2010, 2012, Monty Program Ab
+/* Copyright (c) 2002, 2015, Oracle and/or its affiliates.
+   Copyright (c) 2010, 2015, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -5854,7 +5854,7 @@ int subselect_partial_match_engine::exec()
       /* Search for a complete match. */
       if ((lookup_res= lookup_engine->index_lookup()))
       {
-        /* An error occured during lookup(). */
+        /* An error occurred during lookup(). */
         item_in->value= 0;
         item_in->null_value= 0;
         return lookup_res;

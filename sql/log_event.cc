@@ -1,6 +1,6 @@
 /*
-   Copyright (c) 2000, 2014, Oracle and/or its affiliates.
-   Copyright (c) 2009, 2014, Monty Program Ab.
+   Copyright (c) 2000, 2015, Oracle and/or its affiliates.
+   Copyright (c) 2009, 2016, MariaDB
 
    This program is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
@@ -1348,9 +1348,9 @@ int Log_event::read_log_event(IO_CACHE* file, String* packet,
     if (packet->append(file, data_len))
     {
       /*
-        Fatal error occured when appending rest of the event
+        Fatal error occurred when appending rest of the event
         to packet, possible failures:
-	1. EOF occured when reading from file, it's really an error
+	1. EOF occurred when reading from file, it's really an error
            as data_len is >=0 there's supposed to be more bytes available.
            file->error will have been set to number of bytes left to read
         2. Read was interrupted, file->error would normally be set to -1
@@ -3409,7 +3409,7 @@ Query_log_event::Query_log_event(const char* buf, uint event_len,
   
   slave_proxy_id= thread_id = uint4korr(buf + Q_THREAD_ID_OFFSET);
   exec_time = uint4korr(buf + Q_EXEC_TIME_OFFSET);
-  db_len = (uint)buf[Q_DB_LEN_OFFSET]; // TODO: add a check of all *_len vars
+  db_len = (uchar)buf[Q_DB_LEN_OFFSET]; // TODO: add a check of all *_len vars
   error_code = uint2korr(buf + Q_ERR_CODE_OFFSET);
 
   /*
@@ -4294,7 +4294,8 @@ int Query_log_event::do_apply_event(rpl_group_info *rgi,
           rgi->gtid_pending= false;
 
           gtid= rgi->current_gtid;
-          if (rpl_global_gtid_slave_state.record_gtid(thd, &gtid, sub_id, true, false))
+          if (rpl_global_gtid_slave_state->record_gtid(thd, &gtid, sub_id,
+                                                       true, false))
           {
             int errcode= thd->get_stmt_da()->sql_errno();
             if (!is_parallel_retry_error(rgi, errcode))
@@ -4513,7 +4514,7 @@ compare_errors:
 
 end:
   if (sub_id && !thd->is_slave_error)
-    rpl_global_gtid_slave_state.update_state_hash(sub_id, &gtid, rgi);
+    rpl_global_gtid_slave_state->update_state_hash(sub_id, &gtid, rgi);
 
   /*
     Probably we have set thd->query, thd->db, thd->catalog to point to places
@@ -6281,7 +6282,7 @@ int Rotate_log_event::do_update_pos(rpl_group_info *rgi)
                         rli->group_master_log_name,
                         (ulong) rli->group_master_log_pos));
     mysql_mutex_unlock(&rli->data_lock);
-    rpl_global_gtid_slave_state.record_and_update_gtid(thd, rgi);
+    rpl_global_gtid_slave_state->record_and_update_gtid(thd, rgi);
     flush_relay_log_info(rli);
     
     /*
@@ -6751,7 +6752,7 @@ Gtid_list_log_event::Gtid_list_log_event(const char *buf, uint event_len,
     for (i= 0; i < count; ++i)
     {
       if (!(sub_id_list[i]=
-            rpl_global_gtid_slave_state.next_sub_id(list[i].domain_id)))
+            rpl_global_gtid_slave_state->next_sub_id(list[i].domain_id)))
       {
         my_free(list);
         my_free(sub_id_list);
@@ -6806,7 +6807,7 @@ Gtid_list_log_event::Gtid_list_log_event(slave_connection_state *gtid_set,
       for (i= 0; i < count; ++i)
       {
         if (!(sub_id_list[i]=
-              rpl_global_gtid_slave_state.next_sub_id(list[i].domain_id)))
+              rpl_global_gtid_slave_state->next_sub_id(list[i].domain_id)))
         {
           my_free(list);
           my_free(sub_id_list);
@@ -6879,11 +6880,11 @@ Gtid_list_log_event::do_apply_event(rpl_group_info *rgi)
     uint32 i;
     for (i= 0; i < count; ++i)
     {
-      if ((ret= rpl_global_gtid_slave_state.record_gtid(thd, &list[i],
+      if ((ret= rpl_global_gtid_slave_state->record_gtid(thd, &list[i],
                                                         sub_id_list[i],
                                                         false, false)))
         return ret;
-      rpl_global_gtid_slave_state.update_state_hash(sub_id_list[i], &list[i],
+      rpl_global_gtid_slave_state->update_state_hash(sub_id_list[i], &list[i],
                                                     NULL);
     }
   }
@@ -7383,7 +7384,8 @@ int Xid_log_event::do_apply_event(rpl_group_info *rgi)
     rgi->gtid_pending= false;
 
     gtid= rgi->current_gtid;
-    err= rpl_global_gtid_slave_state.record_gtid(thd, &gtid, sub_id, true, false);
+    err= rpl_global_gtid_slave_state->record_gtid(thd, &gtid, sub_id, true,
+                                                  false);
     if (err)
     {
       int ec= thd->get_stmt_da()->sql_errno();
@@ -7416,7 +7418,7 @@ int Xid_log_event::do_apply_event(rpl_group_info *rgi)
   thd->mdl_context.release_transactional_locks();
 
   if (!res && sub_id)
-    rpl_global_gtid_slave_state.update_state_hash(sub_id, &gtid, rgi);
+    rpl_global_gtid_slave_state->update_state_hash(sub_id, &gtid, rgi);
 
   /*
     Increment the global status commit count variable
@@ -8169,7 +8171,7 @@ int Stop_log_event::do_update_pos(rpl_group_info *rgi)
     rgi->inc_event_relay_log_pos();
   else if (!rgi->is_parallel_exec)
   {
-    rpl_global_gtid_slave_state.record_and_update_gtid(thd, rgi);
+    rpl_global_gtid_slave_state->record_and_update_gtid(thd, rgi);
     rli->inc_group_relay_log_pos(0, rgi);
     flush_relay_log_info(rli);
   }
@@ -11047,8 +11049,8 @@ bool Table_map_log_event::write_data_body(IO_CACHE *file)
   DBUG_ASSERT(m_dbnam != NULL);
   DBUG_ASSERT(m_tblnam != NULL);
   /* We use only one byte per length for storage in event: */
-  DBUG_ASSERT(m_dblen < 128);
-  DBUG_ASSERT(m_tbllen < 128);
+  DBUG_ASSERT(m_dblen <= MY_MIN(NAME_LEN, 255));
+  DBUG_ASSERT(m_tbllen <= MY_MIN(NAME_LEN, 255));
 
   uchar const dbuf[]= { (uchar) m_dblen };
   uchar const tbuf[]= { (uchar) m_tbllen };
@@ -11392,7 +11394,10 @@ Rows_log_event::write_row(rpl_group_info *rgi,
 
   /* unpack row into table->record[0] */
   if ((error= unpack_current_row(rgi)))
+  {
+    table->file->print_error(error, MYF(0));
     DBUG_RETURN(error);
+  }
 
   if (m_curr_row == m_rows_buf && !invoke_triggers)
   {
@@ -12451,8 +12456,8 @@ Update_rows_log_event::do_exec_row(rpl_group_info *rgi)
       We need to read the second image in the event of error to be
       able to skip to the next pair of updates
     */
-    m_curr_row= m_curr_row_end;
-    unpack_current_row(rgi);
+    if ((m_curr_row= m_curr_row_end))
+      unpack_current_row(rgi);
     return error;
   }
 
